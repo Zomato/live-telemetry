@@ -1,0 +1,93 @@
+name: Version Bump
+
+# Opens a release/vX.Y.Z PR against master. Merging it runs publish-release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: Version bump type
+        required: true
+        type: choice
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Calculate new version
+        id: version
+        env:
+          BUMP_TYPE: ${{ inputs.bump_type }}
+        run: |
+          current=$(grep '^VERSION_NAME=' version.properties | cut -d= -f2)
+          IFS='.' read -r major minor patch <<< "$current"
+          case "$BUMP_TYPE" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          new="$major.$minor.$patch"
+          if git tag --list | grep -qx "v$new"; then
+            echo "::error::Tag v$new already exists"
+            exit 1
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "branch=release/v$new" >> "$GITHUB_OUTPUT"
+          echo "Bumping $current -> $new"
+
+      - name: Create release branch
+        env:
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEW: ${{ steps.version.outputs.new }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # A leftover branch from an abandoned bump is replaced.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git checkout -b "$BRANCH"
+
+          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=$NEW/" version.properties
+          # Keep the install snippet in the README on the version being released.
+          sed -i "s/com\.eternal\.kits:live-telemetry:$CURRENT/com.eternal.kits:live-telemetry:$NEW/g" README.md
+
+          git add version.properties README.md
+          git commit -m "Bump version to $NEW"
+          git push origin "$BRANCH"
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEW: ${{ steps.version.outputs.new }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+          BUMP_TYPE: ${{ inputs.bump_type }}
+        run: |
+          cat > pr_body.md << EOF
+          ## Release v${NEW}
+
+          Bumps \`${CURRENT}\` → \`${NEW}\` (**${BUMP_TYPE}**).
+
+          Before merging:
+          - [ ] CHANGELOG.md has a \`## ${NEW}\` section (push it to this branch if not)
+
+          Merging publishes \`com.eternal.kits:live-telemetry:${NEW}\` to Maven Central, tags
+          \`v${NEW}\`, creates the GitHub release and opens a master → dev sync PR.
+
+          ---
+          *Created by the Version Bump workflow.*
+          EOF
+          pr_url=$(gh pr create --title "Release v${NEW}" --body-file pr_body.md --base master --head "$BRANCH")
+          echo "## Release PR: $pr_url" >> "$GITHUB_STEP_SUMMARY"

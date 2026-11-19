@@ -1,0 +1,128 @@
+name: Publish Release
+
+# Runs when a release/vX.Y.Z PR (from version-bump.yml) is merged into master.
+# Deliberately NOT triggered on push to master as well: a merge fires both events, which would
+# publish twice.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [closed]
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Validate version
+        id: version
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          expected="${HEAD_REF#release/v}"
+          actual=$(grep '^VERSION_NAME=' version.properties | cut -d= -f2)
+          if [[ "$expected" != "$actual" ]]; then
+            echo "::error::Branch says $expected but version.properties has $actual"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$actual" >/dev/null; then
+            echo "::error::Tag v$actual already exists"
+            exit 1
+          fi
+          echo "version=$actual" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Build and test
+        run: ./gradlew build
+
+      - name: Publish to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          for name in ORG_GRADLE_PROJECT_mavenCentralUsername ORG_GRADLE_PROJECT_mavenCentralPassword ORG_GRADLE_PROJECT_signingInMemoryKey; do
+            if [ -z "${!name}" ]; then echo "::error::$name is not set (repository secret missing)"; exit 1; fi
+          done
+          ./remotePublish.sh --release
+
+      - name: Tag and create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          cp sample/build/outputs/apk/debug/sample-debug.apk "live-telemetry-sample-$VERSION.apk"
+          cat > notes_header.md << EOF
+          \`\`\`kotlin
+          implementation("com.eternal.kits:live-telemetry:$VERSION")
+          \`\`\`
+          Maven Central can take up to 30 minutes to serve a new version after release.
+          EOF
+          gh release create "v$VERSION" \
+            --target "$SHA" \
+            --title "v$VERSION" \
+            --notes-file notes_header.md \
+            --generate-notes \
+            --latest \
+            "live-telemetry-sample-$VERSION.apk"
+
+      - name: Delete release branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: git push origin --delete "$HEAD_REF" || echo "Branch already deleted"
+
+      - name: Open master → dev sync PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git fetch origin master dev
+          if [ "$(git rev-list --count origin/dev..origin/master)" -eq 0 ]; then
+            echo "dev already contains master"
+            exit 0
+          fi
+          if [ -n "$(gh pr list --base dev --head master --state open --json url --jq '.[0].url // empty')" ]; then
+            echo "Sync PR already open"
+            exit 0
+          fi
+          gh pr create --base dev --head master \
+            --title "Sync master → dev after v$VERSION" \
+            --body "Brings \`dev\` back in sync with \`master\` after publishing **v$VERSION**. *Created by the Publish Release workflow.*"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Released v$VERSION"
+            echo "- Maven Central: \`com.eternal.kits:live-telemetry:$VERSION\`"
+            echo "- GitHub release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v$VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"
