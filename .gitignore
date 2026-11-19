@@ -1,0 +1,15 @@
+# Build output
+dist/
+bin/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Credentials / local
+.netrc
+.env
+.env.*
