@@ -1,15 +1,17 @@
-# Build output
-dist/
-bin/
-
-# IDE
-.vscode/
+*.iml
+.gradle/
+.kotlin/
+**/build/
+local.properties
+secrets.properties
 .idea/
-
-# OS
 .DS_Store
-
-# Credentials / local
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+.vscode/
 .netrc
 .env
 .env.*

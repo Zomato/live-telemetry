@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Own FileProvider subclass + dedicated authority: the manifest merger keys
+             provider nodes by class name, so reusing androidx FileProvider directly
+             collides with the host app's declaration. -->
+        <provider
+            android:name="com.zomato.livetelemetry.LiveTelemetryFileProvider"
+            android:authorities="${applicationId}.livetelemetry.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/live_telemetry_file_paths" />
+        </provider>
+    </application>
+
+</manifest>

@@ -1,0 +1,9 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # Gradle dependencies are not auto-bumped: the library's versions in gradle/libs.versions.toml
+  # are deliberate compatibility floors (see the comment there). Build tooling (AGP, Kotlin,
+  # Gradle, maven-publish) is updated by hand.
