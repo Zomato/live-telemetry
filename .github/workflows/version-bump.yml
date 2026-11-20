@@ -12,6 +12,7 @@ on:
         options: [patch, minor, major]
 
 permissions:
+  actions: write # to start the Build workflow on the release branch
   contents: write
   pull-requests: write
 
@@ -91,3 +92,7 @@ jobs:
           EOF
           pr_url=$(gh pr create --title "Release v${NEW}" --body-file pr_body.md --base master --head "$BRANCH")
           echo "## Release PR: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+
+          # PRs opened with GITHUB_TOKEN don't trigger pull_request workflows, so the required
+          # Build check would never start. A workflow_dispatch run on the same commit satisfies it.
+          gh workflow run build.yml --ref "$BRANCH"
