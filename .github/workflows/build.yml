@@ -38,7 +38,7 @@ jobs:
         run: ./gradlew :live-telemetry:publishToMavenLocal
 
       - name: Upload sample APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sample-debug-apk
           path: sample/build/outputs/apk/debug/*.apk
@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports
           path: '**/build/reports/'
